@@ -137,7 +137,7 @@ echo -e "${YELLOW}Step 6: Testing track-it functionality...${NC}"
 TEST_ID="test-install-$(date +%s)"
 echo -e "  Running test process with ID: $TEST_ID"
 
-$SCRIPT_DIR/track-it --id "$TEST_ID" bash -c "echo 'Test stdout message'; echo 'Test stderr message' >&2; exit 0" 2>/dev/null
+MCP_PROCESS_WRAPPER_LOG_DIR="$LOG_DIR" $SCRIPT_DIR/track-it --id "$TEST_ID" bash -c "echo 'Test stdout message'; echo 'Test stderr message' >&2; exit 0" 2>/dev/null
 
 # Check if process was registered
 echo -e "  Checking process registration..."
