@@ -68,22 +68,37 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="list_processes",
-            description="List all tracked processes with their status and full paths to log files. Claude can read the log files directly using the provided paths.",
+            description="""List processes that were tracked using the 'track-it' command-line wrapper.
+
+Returns process information including:
+- Process ID, command, and status (running/completed/failed)
+- Full absolute paths to three log files:
+  * .log (combined stdout+stderr)
+  * .stdout.log (stdout only)
+  * .stderr.log (stderr only)
+- Timestamps and exit codes
+
+After getting paths from this tool, use your native file tools:
+- Read('/path/to/file.log') to read complete logs
+- Grep(path='/path/to/file.log', pattern='ERROR') to search
+- Bash('tail -f /path/to/file.log') to monitor
+
+Note: This tool only LISTS processes. New processes must be started externally using the track-it command.""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "status": {
                         "type": "string",
-                        "description": "Optional filter by status",
+                        "description": "Filter by process status: 'running' (still active), 'completed' (exited successfully with code 0), or 'failed' (exited with non-zero code)",
                         "enum": ["running", "completed", "failed"],
                     },
                     "limit": {
                         "type": "number",
-                        "description": "Maximum number of processes to return (newest first)",
+                        "description": "Maximum number of processes to return, ordered by start time (newest first). Default: all processes",
                     },
                     "process_id": {
                         "type": "string",
-                        "description": "Optional: get info for a specific process ID",
+                        "description": "Get info for a specific process by its ID (e.g., 'web-server' or 'proc_20251026_143245_123456'). If provided, other filters are ignored",
                     },
                 },
             },
@@ -169,10 +184,14 @@ Log Files:
 
         output_lines.append(f"{'='*60}")
 
-        # Also include a tip for Claude
-        output_lines.append(
-            "\nTip: You can read any log file directly using the Read tool with the full path provided above."
-        )
+        # Also include helpful examples for Claude
+        output_lines.append("\n" + "=" * 60)
+        output_lines.append("\nHow to use these log files:")
+        output_lines.append("1. Read a complete log: Read('/full/path/to/process.log')")
+        output_lines.append("2. Search for errors: Grep(path='/full/path/to/process.stderr.log', pattern='ERROR|FAIL')")
+        output_lines.append("3. Monitor live output: Bash('tail -f /full/path/to/process.log')")
+        output_lines.append("4. Check last 50 lines: Bash('tail -50 /full/path/to/process.stdout.log')")
+        output_lines.append("\nNote: Processes must be started externally with: track-it <command>")
 
         return [TextContent(type="text", text="\n".join(output_lines))]
 

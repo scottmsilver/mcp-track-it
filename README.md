@@ -1,6 +1,6 @@
-# track-it: Process Wrapper with MCP Integration
+# MCP Process Wrapper
 
-A simple ptrace/dtrace-like command wrapper that captures process output and makes it available to Claude via MCP (Model Context Protocol).
+A minimalist MCP (Model Context Protocol) server that enables Claude to monitor processes with independent stdout/stderr tracking.
 
 ## Architecture
 
