@@ -70,6 +70,15 @@ async def list_tools() -> list[Tool]:
             name="list_processes",
             description="""List processes that were tracked using the 'track-it' command-line wrapper.
 
+IMPORTANT: If the user mentions they ran something with 'track-it' (e.g., "I ran track-it python script.py" or "I'm tracking my server with track-it"),
+use this tool to find and analyze those processes. The user's track-it commands create the processes that this tool lists.
+
+Common user patterns:
+- "I tracked X with track-it" → Use list_processes() to find process X
+- "track-it --id webserver ..." → Use list_processes(process_id='webserver')
+- "Check my tracked processes" → Use list_processes()
+- "What did my script output?" → Find the process, then read its logs
+
 Returns process information including:
 - Process ID, command, and status (running/completed/failed)
 - Full absolute paths to three log files:
@@ -81,9 +90,10 @@ Returns process information including:
 After getting paths from this tool, use your native file tools:
 - Read('/path/to/file.log') to read complete logs
 - Grep(path='/path/to/file.log', pattern='ERROR') to search
-- Bash('tail -f /path/to/file.log') to monitor
+- Bash('tail -f /path/to/file.log') to monitor running processes
+- Bash('tail -100 /path/to/file.stderr.log') to check recent errors
 
-Note: This tool only LISTS processes. New processes must be started externally using the track-it command.""",
+Note: This tool only LISTS processes. Users start processes externally with: track-it <command>""",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -122,8 +132,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             formatted = format_process(process)
 
             # Create human-readable output
-            output = f"""Process: {formatted['process_id']}
-Command: {formatted['command']}
+            output = f"""Found tracked process: {formatted['process_id']}
+(This process was started with: track-it {formatted['command'][:50]}{'...' if len(formatted['command']) > 50 else ''})
+
 Status: {formatted['status']}
 PID: {formatted.get('pid', 'N/A')}
 Started: {formatted['started_at']}
@@ -131,7 +142,7 @@ Completed: {formatted.get('completed_at', 'N/A')}
 Exit Code: {formatted.get('exit_code', 'N/A')}
 Working Dir: {formatted.get('working_dir', 'N/A')}
 
-Log Files:
+Log Files (use these paths with Read/Grep/Bash tools):
   Combined: {formatted['logs']['combined']}"""
 
             if formatted.get("has_separate_streams"):
@@ -149,13 +160,19 @@ Log Files:
         )
 
         if not processes:
-            return [TextContent(type="text", text="No processes found.")]
+            return [
+                TextContent(
+                    type="text",
+                    text="No tracked processes found.\n\nThe user needs to start processes with: track-it <command>\nExample: track-it python script.py\n\nOnce they run track-it, those processes will appear here.",
+                )
+            ]
 
         # Format all processes
         formatted_processes = [format_process(p) for p in processes]
 
         # Create summary output
-        output_lines = [f"Found {len(formatted_processes)} process(es):\n"]
+        output_lines = [f"Found {len(formatted_processes)} process(es) tracked with 'track-it':\n"]
+        output_lines.append("(These are processes the user started with: track-it <command>)\n")
 
         for proc in formatted_processes:
             output_lines.append(f"{'='*60}")
