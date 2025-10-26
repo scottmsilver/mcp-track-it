@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "process-wrapper": {
+      "command": "python",
+      "args": [
+        "/absolute/path/to/mcp-process-wrapper/process_wrapper_mcp.py"
+      ],
+      "env": {
+        "MCP_PROCESS_WRAPPER_LOG_DIR": "/path/to/your/log/directory"
+      }
+    }
+  }
+}

@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""
+track-it-clean: Clean implementation that creates independent copies of stdout/stderr
+without interfering with the tracked process's normal output behavior.
+
+This version:
+- Lets the tracked process output normally to stdout/stderr
+- Independently captures copies to separate log files
+- Does not require any environment variables in the tracked process
+- Works with colored output, interactive programs, etc.
+
+Usage:
+    track-it-clean python my_app.py --foo --bar
+    track-it-clean --id my-service python app.py
+    track-it-clean --dir /path/to/workdir ./script.sh
+"""
+
+import argparse
+import os
+import select
+import signal
+import subprocess
+import sys
+import threading
+from datetime import datetime
+from pathlib import Path
+
+from process_registry import ProcessRegistry
+
+
+def generate_process_id() -> str:
+    """Generate a unique process ID based on timestamp."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return f"proc_{timestamp}"
+
+
+def get_log_paths(process_id: str) -> tuple[Path, Path, Path]:
+    """Get the log file paths for a process (combined, stdout, stderr)."""
+    log_dir = Path(os.getenv("MCP_PROCESS_WRAPPER_LOG_DIR", "./process_logs"))
+    log_dir.mkdir(exist_ok=True)
+    return (
+        log_dir / f"{process_id}.log",           # Combined log
+        log_dir / f"{process_id}.stdout.log",    # Stdout only
+        log_dir / f"{process_id}.stderr.log",    # Stderr only
+    )
+
+
+def stream_copier(pipe, destinations, stop_event):
+    """
+    Copy data from a pipe to multiple destinations in a thread.
+
+    Args:
+        pipe: File descriptor or file object to read from
+        destinations: List of file objects to write to
+        stop_event: Threading event to signal when to stop
+    """
+    try:
+        while not stop_event.is_set():
+            # Use select to check if data is available
+            ready, _, _ = select.select([pipe], [], [], 0.1)
+            if ready:
+                try:
+                    # Read available data
+                    if hasattr(pipe, 'read'):
+                        data = pipe.read(4096)
+                    else:
+                        data = os.read(pipe, 4096)
+
+                    if not data:
+                        break  # EOF reached
+
+                    # Decode if bytes
+                    if isinstance(data, bytes):
+                        text = data.decode('utf-8', errors='replace')
+                    else:
+                        text = data
+
+                    # Write to all destinations
+                    for dest in destinations:
+                        dest.write(text)
+                        dest.flush()
+
+                except (OSError, IOError):
+                    # Pipe closed or error reading
+                    break
+
+    except Exception as e:
+        print(f"[track-it] Stream copier error: {e}", file=sys.stderr)
+
+
+def run_process(command, working_dir, log_combined, log_stdout, log_stderr):
+    """
+    Run a process with independent stdout/stderr copying.
+
+    The process outputs normally to the console, and we create
+    independent copies in log files.
+    """
+    # Start the process with separate pipes for stdout and stderr
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=sys.stdin,
+        cwd=working_dir,
+        bufsize=0,  # Unbuffered for real-time output
+    )
+
+    # Event to signal threads to stop
+    stop_event = threading.Event()
+
+    # Create threads to copy streams
+    stdout_thread = threading.Thread(
+        target=stream_copier,
+        args=(process.stdout, [sys.stdout, log_stdout, log_combined], stop_event),
+        daemon=True
+    )
+
+    stderr_thread = threading.Thread(
+        target=stream_copier,
+        args=(process.stderr, [sys.stderr, log_stderr, log_combined], stop_event),
+        daemon=True
+    )
+
+    # Start the threads
+    stdout_thread.start()
+    stderr_thread.start()
+
+    return process, stdout_thread, stderr_thread, stop_event
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Track commands with independent stdout/stderr copies",
+        usage="%(prog)s [options] command [args...]",
+    )
+    parser.add_argument(
+        "--id",
+        dest="process_id",
+        help="Custom process ID (auto-generated if not provided)",
+    )
+    parser.add_argument(
+        "--dir",
+        dest="working_dir",
+        help="Working directory for the command",
+    )
+    parser.add_argument(
+        "command",
+        nargs=argparse.REMAINDER,
+        help="Command and arguments to execute",
+    )
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Setup
+    process_id = args.process_id or generate_process_id()
+    working_dir = args.working_dir or os.getcwd()
+    log_combined, log_stdout, log_stderr = get_log_paths(process_id)
+    command_str = " ".join(args.command)
+
+    # Initialize registry
+    registry = ProcessRegistry()
+
+    # Open all log files
+    with open(log_combined, "w", buffering=1) as log_comb, \
+         open(log_stdout, "w", buffering=1) as log_out, \
+         open(log_stderr, "w", buffering=1) as log_err:
+
+        # Write headers to all logs
+        header = f"""{'='*60}
+Process ID: {process_id}
+Command: {command_str}
+Working directory: {working_dir}
+Started at: {datetime.now().isoformat()}
+{'='*60}
+
+"""
+        for log in [log_comb, log_out, log_err]:
+            log.write(header)
+            log.flush()
+
+        print(f"[track-it] Process ID: {process_id}")
+        print(f"[track-it] Command: {command_str}")
+        print(f"[track-it] Working directory: {working_dir}")
+        print(f"[track-it] Logs:")
+        print(f"  Combined: {log_combined}")
+        print(f"  Stdout:   {log_stdout}")
+        print(f"  Stderr:   {log_stderr}")
+        print(f"[track-it] Starting process...\n")
+
+        try:
+            # Run the process with stream copying
+            process, stdout_thread, stderr_thread, stop_event = run_process(
+                args.command,
+                working_dir,
+                log_comb,
+                log_out,
+                log_err
+            )
+
+            # Register process with all log files
+            registry.register_process(
+                process_id=process_id,
+                command=command_str,
+                pid=process.pid,
+                log_file=str(log_combined),
+                working_dir=working_dir,
+                stdout_log=str(log_stdout),
+                stderr_log=str(log_stderr),
+            )
+
+            # Handle signals gracefully
+            def signal_handler(signum, frame):
+                print(f"\n[track-it] Received signal {signum}, stopping process...")
+                stop_event.set()
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print("[track-it] Process didn't terminate, killing...")
+                    process.kill()
+                    process.wait()
+
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+            # Wait for process to complete
+            exit_code = process.wait()
+
+            # Signal threads to stop and wait for them
+            stop_event.set()
+            stdout_thread.join(timeout=1)
+            stderr_thread.join(timeout=1)
+
+            # Write footers
+            footer = f"""
+{'='*60}
+Process exited with code {exit_code}
+Completed at: {datetime.now().isoformat()}
+{'='*60}
+"""
+            for log in [log_comb, log_out, log_err]:
+                log.write(footer)
+
+            # Update registry
+            status = "completed" if exit_code == 0 else "failed"
+            registry.update_process_status(
+                process_id=process_id,
+                status=status,
+                exit_code=exit_code,
+            )
+
+            print(f"\n[track-it] Process {status}")
+            print(f"[track-it] Exit code: {exit_code}")
+
+            sys.exit(exit_code)
+
+        except FileNotFoundError:
+            error_msg = f"Command not found: {args.command[0]}"
+            for log in [log_comb, log_out, log_err]:
+                log.write(f"\nERROR: {error_msg}\n")
+            print(f"[track-it] ERROR: {error_msg}", file=sys.stderr)
+
+            registry.update_process_status(
+                process_id=process_id,
+                status="failed",
+                exit_code=127,
+            )
+
+            sys.exit(127)
+
+        except Exception as e:
+            error_msg = f"Failed to execute command: {e}"
+            for log in [log_comb, log_out, log_err]:
+                log.write(f"\nERROR: {error_msg}\n")
+            print(f"[track-it] ERROR: {error_msg}", file=sys.stderr)
+
+            registry.update_process_status(
+                process_id=process_id,
+                status="failed",
+                exit_code=1,
+            )
+
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
