@@ -1,95 +1,151 @@
-# MCP Process Wrapper
+# track-it: MCP Process Wrapper
 
-A minimalist MCP (Model Context Protocol) server that enables Claude to monitor processes with independent stdout/stderr tracking.
-
-## Architecture
-
-```
-User: track-it python app.py
-         ↓
-   [track-it wrapper]
-         ↓
-   ┌─────────────┬──────────────┐
-   │             │              │
-SQLite DB    Log Files    Running Process
-   │             │
-   └─────────────┴──────────────
-              ↓
-      [MCP Server] ← Claude queries
-```
-
-**Key Components:**
-
-1. **`track-it`** - CLI wrapper you run (like ptrace/dtrace)
-2. **SQLite Registry** - Multi-process safe process database
-3. **Log Files** - Timestamped stdout/stderr captures
-4. **MCP Server** - Read-only interface for Claude
+A lightweight process tracker that enables Claude to monitor and inspect running processes through the Model Context Protocol (MCP).
 
 ## Features
 
-- **Simple wrapper** - Just prepend `track-it` to any command
-- **Multi-process safe** - SQLite handles concurrent access
-- **Persistent** - Survives restarts, data stored on disk
-- **Searchable logs** - Pattern matching with regex support
-- **Read-only MCP** - Claude can only observe, not execute
+- **🚀 Simple CLI wrapper** - Just prepend `track-it` to any command
+- **🔍 Environment variable support** - Pass env vars to tracked processes
+- **📝 Separate stdout/stderr logs** - Independent capture of output streams
+- **💾 Persistent SQLite storage** - Survives restarts, queryable history
+- **🔒 Read-only MCP interface** - Claude can observe but not execute
+- **📊 Real-time monitoring** - Tail logs of running processes
+- **🛡️ Signal handling** - Clean shutdown with Ctrl+C
 
-## Installation
+## Quick Start
 
-1. Install dependencies:
+### Installation
 
+1. Clone the repository:
 ```bash
-cd mcp-process-wrapper
+git clone https://github.com/scottmsilver/mcp-track-it.git
+cd mcp-track-it
+```
+
+2. Install MCP dependency:
+```bash
 pip install mcp
-# SQLite is built into Python, no extra install needed
 ```
 
-2. Make `track-it` executable:
+3. Run the installer:
+```bash
+./install-and-test.sh
+```
+
+This will:
+- Check Python installation
+- Test the track-it wrapper
+- Configure Claude's MCP settings
+- Run a test process to verify everything works
+
+### Basic Usage
 
 ```bash
-chmod +x track-it
+# Simple command
+./track-it echo "Hello World"
+
+# With custom ID
+./track-it --id myapp python server.py
+
+# With environment variables
+./track-it PORT=8080 DEBUG=true -- python app.py
+
+# Multiple env vars and options
+./track-it --id webserver PORT=3000 HOST=0.0.0.0 -- npm start
 ```
 
-## Usage
+### Environment Variable Support
 
-### Running Processes with track-it
-
-Just prepend `track-it` to your command:
+The new syntax supports passing environment variables to tracked processes:
 
 ```bash
-# Basic usage
-./track-it python my_app.py --foo --bar
+# Format: track-it [options] [ENV=value ...] [--] command [args]
 
-# Custom process ID
-./track-it --id my-service python app.py
-
-# Custom working directory
-./track-it --dir /path/to/workdir ./script.sh
+# Examples:
+./track-it DATABASE_URL=postgres://localhost/mydb -- python manage.py runserver
+./track-it --id worker REDIS_HOST=localhost WORKERS=4 -- python worker.py
 ```
 
-**Output:**
+Use `--` to separate environment variables from the command when needed.
+
+## Claude Integration
+
+Once installed, Claude can monitor your processes using these phrases:
+
+- "List all my tracked processes"
+- "Show me the logs for [process-id]"
+- "Check if my server is still running"
+- "Find any errors in the process logs"
+
+### What Claude Sees
+
+When you run:
+```bash
+./track-it --id myserver PORT=8080 -- python server.py
 ```
-[track-it] Process started: proc_20250126_143022_123456 (PID: 12345)
-[track-it] Log file: ./process_logs/proc_20250126_143022_123456.log
-[track-it] Press Ctrl+C to stop
 
-<your program output here>
+Claude will see:
+- Process ID: `myserver`
+- Status: `running` or `completed`
+- Full command with arguments
+- Environment variables that were set
+- Complete stdout/stderr logs
+- Exit code when completed
 
-[track-it] Process completed: proc_20250126_143022_123456
-[track-it] Exit code: 0
+## File Structure
+
+```
+mcp-track-it/
+├── track-it                    # Main CLI wrapper
+├── mcp_server.py              # MCP server for Claude
+├── process_registry.py        # SQLite database interface
+├── install-and-test.sh        # Main installer
+├── process_logs/              # Log files (auto-created)
+│   ├── [process-id].log       # Combined stdout+stderr
+│   ├── [process-id].stdout.log
+│   └── [process-id].stderr.log
+└── process_registry.db        # SQLite database (auto-created)
 ```
 
-### Connecting Claude via MCP
+## How It Works
 
-Add to your Claude Code `.claude/mcp.json`:
+1. **track-it wrapper** captures your process output
+2. **SQLite database** stores process metadata
+3. **Log files** preserve stdout/stderr streams
+4. **MCP server** provides read-only access to Claude
+
+```
+User runs: track-it python app.py
+    ↓
+Creates 3 log files + DB entry
+    ↓
+Process runs with real-time output
+    ↓
+Claude can query via MCP server
+```
+
+## Advanced Configuration
+
+### Custom Log Directory
+
+Set the environment variable:
+```bash
+export MCP_PROCESS_WRAPPER_LOG_DIR=/path/to/logs
+./track-it python app.py
+```
+
+### Manual MCP Configuration
+
+If you need to manually configure Claude's MCP settings, add to `~/.claude/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "process-wrapper": {
-      "command": "python",
-      "args": ["/path/to/mcp-process-wrapper/mcp_server.py"],
+      "command": "python3",
+      "args": ["/path/to/mcp-track-it/mcp_server.py"],
       "env": {
-        "MCP_PROCESS_WRAPPER_LOG_DIR": "/path/to/process_logs",
+        "MCP_PROCESS_WRAPPER_LOG_DIR": "/path/to/logs",
         "MCP_PROCESS_REGISTRY_DB": "/path/to/process_registry.db"
       }
     }
@@ -97,189 +153,39 @@ Add to your Claude Code `.claude/mcp.json`:
 }
 ```
 
-Restart Claude Code to load the MCP server.
-
-### Claude's Tools
-
-Once configured, Claude can use these tools:
-
-#### 1. `list_processes`
-List all tracked processes with optional filtering:
-
-```
-List all running processes
-List failed processes
-List last 10 processes
-```
-
-#### 2. `get_process_info`
-Get detailed info about a specific process:
-
-```
-Get info for process proc_20250126_143022_123456
-```
-
-#### 3. `read_log`
-Read complete log file:
-
-```
-Read the log for proc_20250126_143022_123456
-```
-
-#### 4. `tail_log`
-Get last N lines of log:
-
-```
-Show last 100 lines of proc_20250126_143022_123456
-```
-
-#### 5. `search_log`
-Search logs with regex and context:
-
-```
-Search for "error" in proc_20250126_143022_123456
-Search for "ERROR.*failed" with 5 context lines
-```
-
-## Example Workflow
-
-```bash
-# Terminal 1: Start your app with track-it
-./track-it python my_web_app.py
-
-# Terminal 2: Ask Claude in Claude Code
-User: "Can you check if my web app is running and show me any errors?"
-
-Claude: [Uses list_processes to see running processes]
-        [Uses search_log to find errors]
-
-        "Your app is running (PID 12345). I found 3 errors in the logs:
-        - Line 45: Connection timeout to database
-        - Line 67: Missing environment variable API_KEY
-        - Line 89: File not found: config.json"
-```
-
-## Configuration
-
-Environment variables:
-
-- **`MCP_PROCESS_WRAPPER_LOG_DIR`** - Directory for log files (default: `./process_logs`)
-- **`MCP_PROCESS_REGISTRY_DB`** - Path to SQLite database (default: `./process_registry.db`)
-
-## Multi-Process Safety
-
-SQLite provides automatic locking for concurrent access:
-
-- **WAL mode** - Readers don't block writers
-- **10-second timeout** - Waits for locks instead of failing
-- **Atomic operations** - No corrupted data from simultaneous writes
-
-You can safely:
-- Run multiple `track-it` processes simultaneously
-- Query via Claude while processes are being added/updated
-- Have multiple Claude instances querying the same registry
-
-## Log File Format
-
-Each process gets a timestamped log file:
-
-```
-============================================================
-Process ID: proc_20250126_143022_123456
-Command: python my_app.py --foo --bar
-Working directory: /home/user/project
-Started at: 2025-01-26T14:30:22.123456
-============================================================
-
-<stdout and stderr merged here>
-
-============================================================
-Process exited with code 0
-Completed at: 2025-01-26T14:32:15.789012
-============================================================
-```
-
-## Database Schema
-
-SQLite database stores:
-
-```sql
-CREATE TABLE processes (
-    process_id TEXT PRIMARY KEY,
-    command TEXT NOT NULL,
-    pid INTEGER,
-    status TEXT NOT NULL,      -- 'running', 'completed', 'failed'
-    log_file TEXT NOT NULL,
-    working_dir TEXT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    exit_code INTEGER
-)
-```
-
-Indexed on `status` and `started_at` for fast queries.
-
-## Files Created
-
-```
-mcp-process-wrapper/
-├── track-it                    # CLI wrapper (you run this)
-├── process_registry.py         # SQLite registry module
-├── process_wrapper_mcp.py      # MCP server (Claude uses this)
-├── process_registry.db         # SQLite database (auto-created)
-├── process_logs/               # Log files directory (auto-created)
-│   ├── proc_20250126_143022_123456.log
-│   └── proc_20250126_143155_789012.log
-├── requirements.txt
-├── .gitignore
-└── README.md
-```
-
-## Comparison with Alternatives
-
-| Feature | track-it | supervisord | strace/dtrace |
-|---------|----------|-------------|---------------|
-| Simple wrapper | ✅ Yes | ❌ Requires config | ✅ Yes |
-| Persistent logs | ✅ Yes | ✅ Yes | ❌ No |
-| Multi-process safe | ✅ SQLite | ✅ Yes | N/A |
-| Claude integration | ✅ Built-in | ⚠️ Via supervisord-mcp | ❌ No |
-| Searchable logs | ✅ Built-in | ❌ External tools | ❌ No |
-| Zero setup | ✅ Yes | ❌ Config files | ✅ Yes |
-
-## Security
-
-- **Read-only MCP** - Claude cannot start processes, only monitor
-- **Local only** - No network access
-- **File isolation** - Logs stored in configured directory
-- **Process isolation** - Each process has its own log file
-
 ## Troubleshooting
 
-**Q: Claude can't see my processes**
-- Check `MCP_PROCESS_REGISTRY_DB` points to the same database `track-it` is using
-- Restart Claude Code after changing MCP config
-
-**Q: Permission denied on track-it**
+**Permission denied when running track-it:**
 ```bash
 chmod +x track-it
 ```
 
-**Q: Import error for process_registry**
-- Make sure you run the MCP server from the `mcp-process-wrapper` directory
-- Or add the directory to PYTHONPATH
+**Claude can't see processes:**
+- Restart Claude Code after installation
+- Verify MCP server is listed: Ask Claude to run `/mcp` command
 
-**Q: Logs not appearing**
-- Check `MCP_PROCESS_WRAPPER_LOG_DIR` is writable
-- Ensure directory exists or can be created
+**Process gets stuck when hitting Ctrl+C:**
+- Update to the latest version (this bug was fixed)
 
-## Development
+**Logs not appearing:**
+- Check write permissions in the log directory
+- Verify disk space is available
 
-To extend functionality:
+## Recent Improvements
 
-1. **Add new columns to DB**: Edit `process_registry.py._init_database()`
-2. **Add new MCP tools**: Edit `process_wrapper_mcp.py.list_tools()`
-3. **Modify log capture**: Edit `track-it` main loop
+- ✅ **Environment variable support** - Pass env vars to tracked processes
+- ✅ **Absolute path storage** - Reliable log file access across directories
+- ✅ **Fixed signal handling** - Clean shutdown without infinite loops
+- ✅ **Better path resolution** - MCP server correctly finds logs from any working directory
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## License
 
-MIT - Use freely, modify as needed.
+MIT License - See LICENSE file for details.
+
+## Author
+
+Created as a lightweight alternative to complex process managers, specifically designed for Claude MCP integration.
