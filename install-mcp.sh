@@ -25,7 +25,7 @@ cat > "$MCP_CONFIG_FILE" << EOF
 {
   "mcpServers": {
     "process-wrapper": {
-      "command": "/home/ssilver/anaconda3/bin/python3",
+      "command": "python3",
       "args": [
         "$SCRIPT_DIR/mcp_server.py"
       ],
@@ -43,7 +43,7 @@ echo "✓ MCP config created at: $MCP_CONFIG_FILE"
 echo ""
 echo "Configuration:"
 echo "  - Server name: process-wrapper"
-echo "  - Python: /home/ssilver/anaconda3/bin/python3"
+echo "  - Python: python3"
 echo "  - Script: $SCRIPT_DIR/mcp_server.py"
 echo "  - Log dir: $SCRIPT_DIR/process_logs"
 echo "  - Database: $SCRIPT_DIR/process_registry.db"

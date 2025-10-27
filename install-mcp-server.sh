@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_CMD="/home/ssilver/anaconda3/bin/python3"
+PYTHON_CMD="python3"
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}MCP Process Wrapper - Smart Installer${NC}"

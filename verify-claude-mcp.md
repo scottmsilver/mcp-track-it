@@ -83,7 +83,7 @@ list_processes is not defined
 6. **Verify Python path**
    The Python path in mcp.json must be exact:
    ```json
-   "command": "/home/ssilver/anaconda3/bin/python3"
+   "command": "python3"
    ```
 
 ## Manual Test Without Claude

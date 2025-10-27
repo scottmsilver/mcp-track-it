@@ -20,11 +20,11 @@ echo ""
 
 # Step 1: Check Python availability
 echo -e "${YELLOW}Step 1: Checking Python installation...${NC}"
-PYTHON_CMD="/home/ssilver/anaconda3/bin/python3"
+PYTHON_CMD="python3"
 
-if [ ! -f "$PYTHON_CMD" ]; then
-    echo -e "${RED}✗ Python not found at: $PYTHON_CMD${NC}"
-    echo "Please update the PYTHON_CMD variable in this script"
+if ! command -v "$PYTHON_CMD" &> /dev/null; then
+    echo -e "${RED}✗ Python3 not found in PATH${NC}"
+    echo "Please install Python 3 or update the PYTHON_CMD variable"
     exit 1
 fi
 

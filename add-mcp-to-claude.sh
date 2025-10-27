@@ -12,7 +12,7 @@ claude mcp remove process-wrapper 2>/dev/null || true
 claude mcp add --transport stdio process-wrapper \
   --env MCP_PROCESS_WRAPPER_LOG_DIR="$SCRIPT_DIR/process_logs" \
   --env MCP_PROCESS_REGISTRY_DB="$SCRIPT_DIR/process_registry.db" \
-  -- /home/ssilver/anaconda3/bin/python3 "$SCRIPT_DIR/mcp_server.py"
+  -- python3 "$SCRIPT_DIR/mcp_server.py"
 
 echo ""
 echo "Checking if server was added..."

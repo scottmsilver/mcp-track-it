@@ -87,10 +87,10 @@ Add to your Claude Code `.claude/mcp.json`:
   "mcpServers": {
     "process-wrapper": {
       "command": "python",
-      "args": ["/home/ssilver/development/invoice2/mcp-process-wrapper/process_wrapper_mcp.py"],
+      "args": ["/path/to/mcp-process-wrapper/mcp_server.py"],
       "env": {
-        "MCP_PROCESS_WRAPPER_LOG_DIR": "/home/ssilver/development/invoice2/process_logs",
-        "MCP_PROCESS_REGISTRY_DB": "/home/ssilver/development/invoice2/mcp-process-wrapper/process_registry.db"
+        "MCP_PROCESS_WRAPPER_LOG_DIR": "/path/to/process_logs",
+        "MCP_PROCESS_REGISTRY_DB": "/path/to/process_registry.db"
       }
     }
   }
