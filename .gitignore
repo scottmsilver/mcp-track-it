@@ -2,19 +2,89 @@
 process_logs/
 *.log
 
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
 venv/
 ENV/
 env/
+.venv/
+.ENV/
 
-# IDE
-.vscode/
+# PyCharm
 .idea/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Vim
 *.swp
 *.swo
 *~
+.*.sw[op]
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# MCP/Claude specific
+claude.json
+.claude/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Installation/test artifacts
+test-install-*
+install-test-*
