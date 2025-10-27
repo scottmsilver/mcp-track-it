@@ -37,6 +37,7 @@ def generate_process_id() -> str:
 def get_log_paths(process_id: str) -> tuple[Path, Path, Path]:
     """Get the log file paths for a process (combined, stdout, stderr)."""
     log_dir = Path(os.getenv("MCP_PROCESS_WRAPPER_LOG_DIR", "./process_logs"))
+    log_dir = log_dir.resolve()  # Convert to absolute path
     log_dir.mkdir(exist_ok=True)
     return (
         log_dir / f"{process_id}.log",           # Combined log
@@ -88,7 +89,7 @@ def stream_copier(pipe, destinations, stop_event):
         print(f"[track-it] Stream copier error: {e}", file=sys.stderr)
 
 
-def run_process(command, working_dir, log_combined, log_stdout, log_stderr):
+def run_process(command, working_dir, log_combined, log_stdout, log_stderr, env=None):
     """
     Run a process with independent stdout/stderr copying.
 
@@ -102,6 +103,7 @@ def run_process(command, working_dir, log_combined, log_stdout, log_stderr):
         stderr=subprocess.PIPE,
         stdin=sys.stdin,
         cwd=working_dir,
+        env=env,
         bufsize=0,  # Unbuffered for real-time output
     )
 
@@ -128,53 +130,121 @@ def run_process(command, working_dir, log_combined, log_stdout, log_stderr):
     return process, stdout_thread, stderr_thread, stop_event
 
 
+def parse_custom_args(argv):
+    """
+    Parse arguments with support for environment variables.
+    Format: track-it [options] [ENV=value ...] [--] command [args...]
+    """
+    process_id = None
+    working_dir = None
+    env_vars = {}
+    command = []
+
+    i = 0
+    # First, parse track-it options
+    while i < len(argv):
+        arg = argv[i]
+        if arg == '--id' and i + 1 < len(argv):
+            process_id = argv[i + 1]
+            i += 2
+        elif arg == '--dir' and i + 1 < len(argv):
+            working_dir = argv[i + 1]
+            i += 2
+        elif arg in ['-h', '--help']:
+            return None, None, None, None  # Signal to show help
+        elif arg == '--':
+            # Everything after -- is the command
+            command = argv[i + 1:]
+            break
+        elif '=' in arg and not arg.startswith('-'):
+            # This looks like an environment variable
+            key, value = arg.split('=', 1)
+            if key and key.isidentifier():  # Valid env var name
+                env_vars[key] = value
+                i += 1
+            else:
+                # Not a valid env var, must be start of command
+                command = argv[i:]
+                break
+        elif arg.startswith('-'):
+            # Unknown option
+            print(f"Error: Unknown option: {arg}", file=sys.stderr)
+            sys.exit(1)
+        else:
+            # First non-option, non-env-var argument is the start of the command
+            command = argv[i:]
+            break
+
+    return process_id, working_dir, env_vars, command
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Track commands with independent stdout/stderr copies",
-        usage="%(prog)s [options] command [args...]",
-    )
-    parser.add_argument(
-        "--id",
-        dest="process_id",
-        help="Custom process ID (auto-generated if not provided)",
-    )
-    parser.add_argument(
-        "--dir",
-        dest="working_dir",
-        help="Working directory for the command",
-    )
-    parser.add_argument(
-        "command",
-        nargs=argparse.REMAINDER,
-        help="Command and arguments to execute",
-    )
+    # Custom argument parsing to support env vars
+    process_id, working_dir, env_vars, command = parse_custom_args(sys.argv[1:])
 
-    args = parser.parse_args()
+    if process_id is None and working_dir is None and env_vars is None and command is None:
+        # Show help
+        print("""Usage: track-it [options] [ENV=value ...] [--] command [args...]
 
-    if not args.command:
-        parser.print_help()
+Track commands with independent stdout/stderr logging.
+
+Options:
+  --id ID          Custom process ID (auto-generated if not provided)
+  --dir DIR        Working directory for the command
+  -h, --help       Show this help message
+
+Environment Variables:
+  You can set environment variables by specifying KEY=value pairs
+  before the command. Use -- to separate env vars from the command
+  if needed.
+
+Examples:
+  track-it echo hello
+  track-it --id myapp python app.py
+  track-it PORT=8080 -- python server.py
+  track-it --id web PORT=3000 DEBUG=true -- npm start
+""")
+        sys.exit(0)
+
+    if not command:
+        print("Error: No command specified", file=sys.stderr)
         sys.exit(1)
 
     # Setup
-    process_id = args.process_id or generate_process_id()
-    working_dir = args.working_dir or os.getcwd()
+    process_id = process_id or generate_process_id()
+    working_dir = working_dir or os.getcwd()
     log_combined, log_stdout, log_stderr = get_log_paths(process_id)
-    command_str = " ".join(args.command)
+    command_str = " ".join(command)
 
     # Initialize registry
     registry = ProcessRegistry()
+
+    # Prepare environment
+    if env_vars:
+        # Merge with existing environment
+        env = os.environ.copy()
+        env.update(env_vars)
+    else:
+        env = None  # Use parent's environment as-is
 
     # Open all log files
     with open(log_combined, "w", buffering=1) as log_comb, \
          open(log_stdout, "w", buffering=1) as log_out, \
          open(log_stderr, "w", buffering=1) as log_err:
 
+        # Build header with env vars if present
+        env_section = ""
+        if env_vars:
+            env_section = "Environment variables:\n"
+            for key, value in env_vars.items():
+                env_section += f"  {key}={value}\n"
+
         # Write headers to all logs
         header = f"""{'='*60}
 Process ID: {process_id}
 Command: {command_str}
 Working directory: {working_dir}
-Started at: {datetime.now().isoformat()}
+{env_section}Started at: {datetime.now().isoformat()}
 {'='*60}
 
 """
@@ -185,6 +255,10 @@ Started at: {datetime.now().isoformat()}
         print(f"[track-it] Process ID: {process_id}")
         print(f"[track-it] Command: {command_str}")
         print(f"[track-it] Working directory: {working_dir}")
+        if env_vars:
+            print(f"[track-it] Environment variables:")
+            for key, value in env_vars.items():
+                print(f"  {key}={value}")
         print(f"[track-it] Logs:")
         print(f"  Combined: {log_combined}")
         print(f"  Stdout:   {log_stdout}")
@@ -194,11 +268,12 @@ Started at: {datetime.now().isoformat()}
         try:
             # Run the process with stream copying
             process, stdout_thread, stderr_thread, stop_event = run_process(
-                args.command,
+                command,
                 working_dir,
                 log_comb,
                 log_out,
-                log_err
+                log_err,
+                env
             )
 
             # Register process with all log files
@@ -218,11 +293,33 @@ Started at: {datetime.now().isoformat()}
                 stop_event.set()
                 process.terminate()
                 try:
-                    process.wait(timeout=5)
+                    exit_code = process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     print("[track-it] Process didn't terminate, killing...")
                     process.kill()
-                    process.wait()
+                    exit_code = process.wait()
+
+                # Update registry with interrupted status
+                registry.update_process_status(
+                    process_id=process_id,
+                    status="failed",
+                    exit_code=exit_code if exit_code is not None else -1,
+                )
+
+                # Write interruption footer to logs
+                footer = f"""
+{'='*60}
+Process interrupted by signal {signum}
+Exit code: {exit_code if exit_code is not None else -1}
+Completed at: {datetime.now().isoformat()}
+{'='*60}
+"""
+                for log in [log_comb, log_out, log_err]:
+                    log.write(footer)
+                    log.flush()
+
+                print(f"[track-it] Process terminated with exit code {exit_code}")
+                sys.exit(0)  # Exit the track-it process
 
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)

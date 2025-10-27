@@ -27,8 +27,26 @@ def format_process(process: dict[str, Any]) -> dict[str, Any]:
 
     Returns a dictionary with all process details including full paths to logs.
     """
-    # Get absolute paths for log files
-    log_dir = Path(os.getenv("MCP_PROCESS_WRAPPER_LOG_DIR", "./process_logs")).resolve()
+
+    def resolve_log_path(log_path: Optional[str], working_dir: Optional[str]) -> Optional[str]:
+        """Resolve a log path to absolute, handling both old relative and new absolute paths."""
+        if not log_path:
+            return None
+
+        path = Path(log_path)
+
+        # If already absolute, just return it
+        if path.is_absolute():
+            return str(path)
+
+        # For relative paths, resolve relative to the working directory where process was started
+        if working_dir:
+            return str((Path(working_dir) / path).resolve())
+
+        # Fallback: resolve relative to current directory (shouldn't happen with fixed code)
+        return str(path.resolve())
+
+    working_dir = process.get("working_dir")
 
     result = {
         "process_id": process["process_id"],
@@ -38,16 +56,16 @@ def format_process(process: dict[str, Any]) -> dict[str, Any]:
         "started_at": process["started_at"],
         "completed_at": process.get("completed_at"),
         "exit_code": process.get("exit_code"),
-        "working_dir": process.get("working_dir"),
-        "logs": {"combined": str(Path(process["log_file"]).resolve()) if process.get("log_file") else None},
+        "working_dir": working_dir,
+        "logs": {"combined": resolve_log_path(process.get("log_file"), working_dir)},
     }
 
     # Add separate stream logs if available
     if process.get("stdout_log"):
-        result["logs"]["stdout"] = str(Path(process["stdout_log"]).resolve())
+        result["logs"]["stdout"] = resolve_log_path(process.get("stdout_log"), working_dir)
 
     if process.get("stderr_log"):
-        result["logs"]["stderr"] = str(Path(process["stderr_log"]).resolve())
+        result["logs"]["stderr"] = resolve_log_path(process.get("stderr_log"), working_dir)
 
     # Flag indicating if streams are separate
     result["has_separate_streams"] = process.get("has_separate_streams", False)
